@@ -30,6 +30,21 @@ library(MapColoring)
 # The subfolder in this directory to save the Census shapefiles in.
 data_subfolder <- "./data/"
 
+# For hydrography and roads, the data is organized in files per county. Download data for these county FIPS codes.
+county_fips_codes <- c("Alameda" = "06001",
+                       "Contra Costa" = "06013",
+                       "Marin" = "06041",
+                       "Napa" = "06055",
+                       "San Francisco" = "06075",
+                       "San Mateo" = "06081",
+                       "Santa Clara" = "06085",
+                       "Santa Cruz" = "06087",
+                       "Solano" = "06095",
+                       "Sonoma" = "06097")
+
+# For city boundaries, the data is organized in a single file per state. Download data for these state FIPS codes.
+state_fips_codes <- c("California" = "06")
+
 # The width and height of the image, respectively.
 image_dimensions <- c(9600, 12000)
 
@@ -42,32 +57,54 @@ image_lon <- c(-122.7565, -121.6435)
 road_thickness <- c(0.5, 5)
 
 ########################################################################################################################
-# Download and load in 2019 area hydrography shapefiles from TIGER/Line.                                               #
+# Download and unzip everything from TIGER/Line.                                                                       #
 ########################################################################################################################
 
-# The data is split up by county, so grab Alameda, Contra Costa, Marin, Napa, San Francisco, San Mateo, Santa Clara,
-# Santa Cruz, Solano, and Sonoma.
-water_filenames <- c("Alameda" = "tl_2019_06001_areawater.zip",
-                     "Contra Costa" = "tl_2019_06013_areawater.zip",
-                     "Marin" = "tl_2019_06041_areawater.zip",
-                     "Napa" = "tl_2019_06055_areawater.zip",
-                     "San Francisco" = "tl_2019_06075_areawater.zip",
-                     "San Mateo" = "tl_2019_06081_areawater.zip",
-                     "Santa Clara" = "tl_2019_06085_areawater.zip",
-                     "Santa Cruz" = "tl_2019_06087_areawater.zip",
-                     "Solano" = "tl_2019_06095_areawater.zip",
-                     "Sonoma" = "tl_2019_06097_areawater.zip")
+# Grab and unzip hydrography data for each of the counties listed above.
+water_filenames <- paste0("tl_2019_", county_fips_codes, "_areawater.zip")
+water_temp_files <- map_chr(water_filenames, tempfile)
 
 if (dir.exists(file.path(data_subfolder, "water"))==FALSE) {
     dir.create(file.path(data_subfolder, "water"), recursive=TRUE)
 }
 
-walk(water_filenames, ~download.file(url=paste0("https://www2.census.gov/geo/tiger/TIGER2019/AREAWATER/", .x),
-                                     destfile=file.path(data_subfolder, "water", .x)))
-walk(water_filenames, ~unzip(zipfile=file.path(data_subfolder, "water", .x),
-                             exdir=file.path(data_subfolder, "water")))
+walk2(.x=water_filenames, .y=water_temp_files,
+      ~download.file(url=paste0("https://www2.census.gov/geo/tiger/TIGER2019/AREAWATER/", .x), destfile=.y))
+walk(.x=water_temp_files,
+     ~unzip(zipfile=.x, exdir=file.path(data_subfolder, "water")))
 
-# Now that the data is downloaded and unzipped, load in all ".shp" shapefiles and bind everything together.
+# Grab all municipal city boundaries for all of the states listed above.
+cities_filenames <- paste0("tl_2019_", state_fips_codes, "_place.zip")
+cities_temp_files <- map_chr(cities_filenames, tempfile)
+
+if (dir.exists(file.path(data_subfolder, "cities"))==FALSE) {
+    dir.create(file.path(data_subfolder, "cities"), recursive=TRUE)
+}
+
+walk2(.x=cities_filenames, .y=cities_temp_files,
+      ~download.file(url=paste0("https://www2.census.gov/geo/tiger/TIGER2019/PLACE/", .x), destfile=.y))
+walk(.x=cities_temp_files,
+     ~unzip(zipfile=.x, exdir=file.path(data_subfolder, "cities")))
+
+# Finally, download all road data for each county.
+roads_filenames <- paste0("tl_2019_", county_fips_codes, "_roads.zip")
+roads_temp_files <- map_chr(roads_filenames, tempfile)
+
+if (dir.exists(file.path(data_subfolder, "roads"))==FALSE) {
+    dir.create(file.path(data_subfolder, "roads"), recursive=TRUE)
+}
+
+walk2(.x=roads_filenames, .y=roads_temp_files,
+      ~download.file(url=paste0("https://www2.census.gov/geo/tiger/TIGER2019/ROADS/", .x), destfile=.y))
+walk(.x=roads_temp_files,
+     ~unzip(zipfile=.x, exdir=file.path(data_subfolder, "roads")))
+
+
+########################################################################################################################
+# Load in 2019 area hydrography shapefiles from TIGER/Line and prep all water features.                                #
+########################################################################################################################
+
+# Load in all ".shp" shapefiles in the water subfolder and bind everything together.
 water <- dir(file.path(data_subfolder, "water"), full.names=TRUE) %>%
     str_subset(".shp$") %>%
     map(st_read) %>%
@@ -92,22 +129,9 @@ water_ocean_fill <- c(-123, 37.87,
     st_sfc() %>%
     st_set_crs(4269)
 
-
 ########################################################################################################################
-# Download and load in municipal boundary shapefiles.                                                                  #
+# Load in municipal boundary shapefiles and prep the cities data for plotting.                                         #
 ########################################################################################################################
-
-# This dataset is simpler to download and ingest, as California comes all in one big file.
-city_filename <- "tl_2019_06_place.zip"
-
-if (dir.exists(file.path(data_subfolder, "cities"))==FALSE) {
-    dir.create(file.path(data_subfolder, "cities"), recursive=TRUE)
-}
-
-download.file(url=paste0("https://www2.census.gov/geo/tiger/TIGER2019/PLACE/", city_filename),
-              destfile=file.path(data_subfolder, "cities", city_filename))
-unzip(zipfile=file.path(data_subfolder, "cities", city_filename),
-      exdir=file.path(data_subfolder, "cities"))
 
 cities <- dir(file.path(data_subfolder, "cities"), full.names=TRUE) %>%
     str_subset(".shp$") %>%
@@ -117,15 +141,11 @@ cities <- dir(file.path(data_subfolder, "cities"), full.names=TRUE) %>%
     # cities, so I'll need to filter on CLASSFP=="C1"
     filter(CLASSFP=="C1")
 
-########################################################################################################################
-# This is where things get a little complicated and a little un-tidy. The MapColoring package I'm using is great,      #
-# since it solves the four-color contiguous polygon map problem for me (see the "Four color theorem" Wikipedia page    #
-# for more details), but it's old enough that it can't use the newer sf package for spatial data. This means I'll have #
-# to use the older rgdal package for this specific section.                                                            #
-########################################################################################################################
-
-# This readOGR() function is from rgdal and loads the shapefile as a SpatialPolygonsDataFrame, rather than an sf object.
-# object.
+# This is where things get a little complicated and a little un-tidy. The MapColoring package I'm using is great, since
+# it solves the four-color contiguous polygon map problem for me (see the "Four color theorem" Wikipedia page for more
+# details), but it's old enough that it can't use the newer sf package for spatial data. This means I'll have to use the
+# older rgdal package for this specific section. This readOGR() function is from rgdal and loads the shapefile as a
+# SpatialPolygonsDataFrame, rather than as an sf object.
 cities_sp <- dir(file.path(data_subfolder, "cities"), full.names=TRUE) %>%
     str_subset(".shp$") %>%
     readOGR()
@@ -186,29 +206,8 @@ cities_color_vector <- cities_color_assignments %>%
 cities <- left_join(cities, cities_color_assignments, by="NAME")
 
 ########################################################################################################################
-# Download and read in roads data.                                                                                     #
+# Read in all roads data and prepare it for plotting.                                                                  #
 ########################################################################################################################
-
-# This is very similar to the water data, as it's held in separate files by county.
-road_filenames <- c("Alameda" = "tl_2019_06001_roads.zip",
-                    "Contra Costa" = "tl_2019_06013_roads.zip",
-                    "Marin" = "tl_2019_06041_roads.zip",
-                    "Napa" = "tl_2019_06055_roads.zip",
-                    "San Francisco" = "tl_2019_06075_roads.zip",
-                    "San Mateo" = "tl_2019_06081_roads.zip",
-                    "Santa Clara" = "tl_2019_06085_roads.zip",
-                    "Santa Cruz" = "tl_2019_06087_roads.zip",
-                    "Solano" = "tl_2019_06095_roads.zip",
-                    "Sonoma" = "tl_2019_06097_roads.zip")
-
-if (dir.exists(file.path(data_subfolder, "roads"))==FALSE) {
-    dir.create(file.path(data_subfolder, "roads"), recursive=TRUE)
-}
-
-walk(road_filenames, ~download.file(url=paste0("https://www2.census.gov/geo/tiger/TIGER2019/ROADS/", .x),
-                                     destfile=file.path(data_subfolder, "roads", .x)))
-walk(road_filenames, ~unzip(zipfile=file.path(data_subfolder, "roads", .x),
-                             exdir=file.path(data_subfolder, "roads")))
 
 roads <- dir(file.path(data_subfolder, "roads"), full.names=TRUE) %>%
     str_subset(".shp$") %>%
