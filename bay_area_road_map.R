@@ -107,6 +107,9 @@ walk(.x=roads_temp_files,
 # Load in all ".shp" shapefiles in the water subfolder and bind everything together.
 water <- dir(file.path(data_subfolder, "water"), full.names=TRUE) %>%
     str_subset(".shp$") %>%
+    # NOTE: If this is being run with an R version below 4.0.0, you will need to set stringsAsFactors=FALSE like so.
+    # This applies to all st_read() calls in this script.
+    # map(~st_read(.x, stringsAsFactors=FALSE)) %>%
     map(st_read) %>%
     do.call("rbind", .)
 
